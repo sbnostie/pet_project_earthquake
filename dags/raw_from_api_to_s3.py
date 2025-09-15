@@ -21,16 +21,17 @@ args ={
     "start_time": pendulum.datetime(2025, 7, 13, tz="Asia/Yekaterinburg"),
     "catchup": True,
     "retries": 3,
-    "retry_delay": pendulum.duration(hours=1)
+    "retry_delay": pendulum.duration(hours=1),
 }
 
-def get_dates(**context) -> tuple[str, str]:
-    start_date = context["data_interval_start"].format("YYYY-MM-DD")
-    end_date = context["data_interval_end"].format("YYYY-MM-DD")
-    return start_date, end_date
+def get_dates(**params) -> tuple[str, str, str]:
+    start_date = params["data_interval_start"].format("YYYY-MM-DD")
+    end_date = params["data_interval_end"].format("YYYY-MM-DD")
+    start_time = params["data_interval_start"].to_time_string()
+    return start_date, end_date, start_time
 
 def get_and_transfer_api_data_to_s3(**context):
-    start_date, end_date = get_dates(**context)
+    start_date, end_date, start_time = get_dates(**context)
     logging.info(f"Start load for dates: {start_date}/{end_date}")
     con = duckdb.connect()
 
@@ -51,7 +52,7 @@ def get_and_transfer_api_data_to_s3(**context):
                 *
             FROM
                 read_csv_auto('https://earthquake.usgs.gov/fdsnws/event/1/query?format=csv&starttime={start_date}&endtime={end_date}')              
-        ) TO 's3://prod/{LAYER}/{SOURCE}/{start_date}/{start_date}_00-00-00.gz.parquet';
+        ) TO 's3://prod/{LAYER}/{SOURCE}/{start_date}/{start_date}_{start_time}.gz.parquet';
         """
         
     )
@@ -62,6 +63,7 @@ with DAG(
     dag_id=DAG_ID,
     default_args=args,
     tags=["s3", "raw"],
+    schedule="@hourly",
     description="SHORT_DESCRIPTION",
     max_active_tasks=1,
     max_active_runs=1,
