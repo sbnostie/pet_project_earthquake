@@ -2,9 +2,11 @@ from airflow import DAG
 import duckdb
 import pendulum
 import logging
+from datetime import datetime, timedelta
 from airflow.models import Variable
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import PythonOperator
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
 OWNER = "sb"
 DAG_ID = "raw_from_api_to_s3"
@@ -18,21 +20,21 @@ SECRET_KEY = Variable.get("secret_key")
 
 args ={
     "owner": OWNER,
-    "start_time": pendulum.datetime(2025, 7, 13, tz="Asia/Yekaterinburg"),
+    "start_time": pendulum.datetime(2025, 9, 15, tz="Asia/Yekaterinburg"),
     "catchup": True,
     "retries": 3,
     "retry_delay": pendulum.duration(hours=1),
 }
 
-def get_dates(**params) -> tuple[str, str, str]:
+def get_dates(**params) -> tuple[str, str]:
     start_date = params["data_interval_start"].format("YYYY-MM-DD")
     end_date = params["data_interval_end"].format("YYYY-MM-DD")
-    start_time = params["data_interval_start"].to_time_string()
-    return start_date, end_date, start_time
+    #start_time = params["data_interval_start"].to_time_string() #added by sb
+    return start_date, end_date#, start_time
 
 def get_and_transfer_api_data_to_s3(**context):
-    start_date, end_date, start_time = get_dates(**context)
-    logging.info(f"Start load for dates: {start_date}/{end_date}")
+    start_date, end_date= get_dates(**context)
+    logging.info(f"🐸Start load for dates: {start_date}/{end_date}")
     con = duckdb.connect()
 
     con.sql(
@@ -52,7 +54,7 @@ def get_and_transfer_api_data_to_s3(**context):
                 *
             FROM
                 read_csv_auto('https://earthquake.usgs.gov/fdsnws/event/1/query?format=csv&starttime={start_date}&endtime={end_date}')              
-        ) TO 's3://prod/{LAYER}/{SOURCE}/{start_date}/{start_date}_{start_time}.gz.parquet';
+        ) TO 's3://prod/{LAYER}/{SOURCE}/{start_date}/{start_date}.gz.parquet';
         """
         
     )
@@ -83,4 +85,10 @@ with DAG(
         task_id="end"
     )
 
-    start >> get_and_transfer_api_data_to_s3 >> end
+    trigger_secondary_dag = TriggerDagRunOperator(
+        task_id='trigger_secondary_dag',
+        trigger_dag_id='raw_from_s3_to_pg',  # Идентификатор целевого DAG'a
+        #execution_date=datetime(2025, 9, 15),       # Передача текущей даты запуска (можно передать любые переменные контекста)
+        reset_dag_run=False               # Флаг перезапуска, если DAG уже выполнялся ранее
+    )
+    start >> get_and_transfer_api_data_to_s3 >> end >> trigger_secondary_dag
