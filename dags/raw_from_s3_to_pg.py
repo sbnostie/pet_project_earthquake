@@ -1,7 +1,7 @@
 import logging
 import duckdb
 import pendulum
-import psycopg2 as ps
+
 
 from airflow import DAG
 from airflow.models import Variable
