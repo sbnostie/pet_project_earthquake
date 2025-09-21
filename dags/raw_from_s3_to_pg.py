@@ -1,13 +1,12 @@
 import logging
 import duckdb
 import pendulum
-import psycopg2 as ps
 
 from airflow import DAG
 from airflow.models import Variable
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import PythonOperator
-from airflow.sensors.external_task import ExternalTaskSensor
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
 OWNER = "sb"
 DAG_ID = "raw_from_s3_to_pg"
@@ -38,8 +37,10 @@ args ={
 }
 
 def get_dates(**context) -> tuple[str, str]:
-    start_date = context["data_interval_start"].format("YYYY-MM-DD")
-    end_date = context["data_interval_end"].format("YYYY-MM-DD")
+    start_date = context["data_interval_start"]
+    start_date = start_date.subtract(days = 1).format("YYYY-MM-DD")
+    end_date = context["data_interval_end"]
+    end_date = end_date.format("YYYY-MM-DD")
     #start_time = context["data_interval_start"].to_time_string() #added by sb
     return start_date, end_date#, start_time
 
@@ -58,27 +59,14 @@ def get_and_transfer_raw_data_to_ods_pg(**context):
         SET s3_secret_access_key = '{SECRET_KEY}';
         SET s3_use_ssl = FALSE;
 
-        CREATE SECRET dwh_postgres(
-            TYPE postgres,
-            HOST 'postgres_dwh',
-            PORT 5432,
-            DATABASE postgres_db,
-            USER 'postgres',
-            PASSWORD '{PASSWORD}'
+        ATTACH 'dbname=postgres_db user=postgres password={PASSWORD} host=postgres_dwh port=5432' AS db (TYPE postgres, SCHEMA 'ods');
 
-        );
+        INSERT INTO db.fct_earthquake
+            
+            SELECT 
+                *
+            FROM 's3://prod/{LAYER}/{SOURCE}/{start_date}/{start_date}.gz.parquet';
 
-        ATTACH '' AS dwh_postgres_db (TYPE postgres, SECRET dwh_postgres);
-
-        INSERT INTO dwh_postgres_db.{SCHEMA}.{TARGET_TABLE}
-            (time, latitude, longitude)
-        SELECT 
-        (
-            time,
-            latitude, 
-            longitude
-        ) FROM 's3://prod/{LAYER}/{SOURCE}/{start_date}/{start_date}.gz.parquet';
-        
         """        
     )
     con.close()
@@ -89,7 +77,6 @@ with DAG(
     default_args=args,
     tags=["s3", "raw", "pg", "q"],
     description="SHORT_DESCRIPTION",
-    schedule="@hourly",
     max_active_tasks=1,
     max_active_runs=1,
 ) as dag:
@@ -117,4 +104,19 @@ with DAG(
         task_id="end"
     )
 
-start >> get_and_transfer_api_data_to_s3 >> end
+    trigger_third_dag = TriggerDagRunOperator(
+        task_id='trigger_third_dag',
+        trigger_dag_id='fct_avg_day_earthquake',  # Идентификатор целевого DAG'a
+        #execution_date=datetime(2025, 9, 15),       # Передача текущей даты запуска (можно передать любые переменные контекста)
+        reset_dag_run=False               # Флаг перезапуска, если DAG уже выполнялся ранее
+    )
+
+    trigger_fourth_dag = TriggerDagRunOperator(
+        task_id='trigger_fourth_dag',
+        trigger_dag_id='fct_count_day_earthquake',  # Идентификатор целевого DAG'a
+        #execution_date=datetime(2025, 9, 15),       # Передача текущей даты запуска (можно передать любые переменные контекста)
+        reset_dag_run=False               # Флаг перезапуска, если DAG уже выполнялся ранее
+    )
+
+
+start >> get_and_transfer_api_data_to_s3 >> end >> [trigger_third_dag, trigger_fourth_dag]

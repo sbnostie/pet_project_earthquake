@@ -26,10 +26,12 @@ args ={
     "retry_delay": pendulum.duration(hours=1),
 }
 
-def get_dates(**params) -> tuple[str, str]:
-    start_date = params["data_interval_start"].format("YYYY-MM-DD")
-    end_date = params["data_interval_end"].format("YYYY-MM-DD")
-    #start_time = params["data_interval_start"].to_time_string() #added by sb
+def get_dates(**context) -> tuple[str, str]:
+    start_date = context["data_interval_start"]
+    start_date = start_date.subtract(days = 1).format("YYYY-MM-DD")
+    end_date = context["data_interval_end"]
+    end_date = end_date.format("YYYY-MM-DD")
+    #start_time = context["data_interval_start"].to_time_string() #added by sb
     return start_date, end_date#, start_time
 
 def get_and_transfer_api_data_to_s3(**context):
@@ -65,7 +67,8 @@ with DAG(
     dag_id=DAG_ID,
     default_args=args,
     tags=["s3", "raw"],
-    schedule="@hourly",
+    #schedule="@hourly",
+    schedule="0 */4 * * *",
     description="SHORT_DESCRIPTION",
     max_active_tasks=1,
     max_active_runs=1,
