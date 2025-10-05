@@ -1,10 +1,6 @@
 import logging
 import duckdb
 import pendulum
-<<<<<<< HEAD
-=======
-
->>>>>>> bdfbc09d4b705f68f3830f1803401c478c198f98
 
 from airflow import DAG
 from airflow.models import Variable

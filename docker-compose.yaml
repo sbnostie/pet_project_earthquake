@@ -86,6 +86,10 @@ x-airflow-common:
       condition: service_healthy
 
 services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    ports:
+      - "8123:8123"
   postgres:
     image: postgres:13
     environment:
